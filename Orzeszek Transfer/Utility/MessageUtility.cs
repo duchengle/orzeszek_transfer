@@ -58,7 +58,7 @@ namespace OrzeszekTransfer
 			public IntPtr Data;
 		}
 
-		[DllImport("user32.dll")]
+        [DllImport("user32.dll")]
 		private static extern IntPtr SendMessageTimeout(IntPtr handle, uint messageType, IntPtr senderHandle, IntPtr dataPtr, TimeoutFlags timeoutFlags, uint timeout, out IntPtr result);
 
 		public static event EventHandler<MessageEventArgs> MessageReceived;
@@ -68,9 +68,26 @@ namespace OrzeszekTransfer
 			WindowInteropHelper interopHelper = new WindowInteropHelper(window);
 			HwndSource src = HwndSource.FromHwnd(interopHelper.Handle);
 			src.AddHook(new HwndSourceHook(WindowHook));
-		}
+        }
 
-		public static void SendMessage(string message)
+        delegate bool EnumThreadDelegate(IntPtr hWnd, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        static extern bool EnumThreadWindows(int dwThreadId, EnumThreadDelegate lpfn,
+            IntPtr lParam);
+
+        static IEnumerable<IntPtr> EnumerateProcessWindowHandles(int processId)
+        {
+            var handles = new List<IntPtr>();
+
+            foreach (ProcessThread thread in Process.GetProcessById(processId).Threads)
+                EnumThreadWindows(thread.Id,
+                    (hWnd, lParam) => { handles.Add(hWnd); return true; }, IntPtr.Zero);
+
+            return handles;
+        }
+
+        public static void SendMessage(string message)
 		{
 			if (message == null)
 				throw new ArgumentNullException("message");
@@ -87,8 +104,18 @@ namespace OrzeszekTransfer
 					Marshal.StructureToPtr(data, ptr, false);
 
 					IntPtr res;
-					SendMessageTimeout(proc.MainWindowHandle, CopyDataMessage, IntPtr.Zero, ptr, TimeoutFlags.Block | TimeoutFlags.AbortIfHung, 5000, out res);
-
+					if (proc.MainWindowHandle == IntPtr.Zero)
+					{
+						foreach (var hideHandle in EnumerateProcessWindowHandles(proc.Id))
+						{
+                            SendMessageTimeout(hideHandle, CopyDataMessage, IntPtr.Zero, ptr, TimeoutFlags.Block | TimeoutFlags.AbortIfHung, 5000, out res);
+                        }
+                        
+                    }
+					else
+					{
+                        SendMessageTimeout(proc.MainWindowHandle, CopyDataMessage, IntPtr.Zero, ptr, TimeoutFlags.Block | TimeoutFlags.AbortIfHung, 5000, out res);
+                    }
 					Marshal.FreeHGlobal(ptr);
 					Marshal.FreeHGlobal(data.Data);
 				}
